@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
-	"github.com/kulkarnisameer7/saigo/exercise-001-corpus/src/corpus"
+	"saigo/exercise-001-corpus/src/corpus"
+	//"github.com/kulkarnisameer7/saigo/exercise-001-corpus/src/corpus"
 )
 
+var concurrency = 8
 func main() {
 	files := os.Args[1:]
 	fmt.Println("File path: ", files)

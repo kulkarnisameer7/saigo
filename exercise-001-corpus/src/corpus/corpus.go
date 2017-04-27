@@ -6,7 +6,23 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 )
+
+//Create a struct to protect our lovely counts map
+
+type CountStore struct {
+	sync.Mutex
+	counts map[string]int
+}
+
+//Override New to allow creation of a new count store
+
+func New() *CountStore {
+	return &CountStore{
+		counts: make(map[string]int),
+	}
+}
 
 func Check(e error) {
 	if e != nil {
@@ -16,26 +32,74 @@ func Check(e error) {
 
 func WordCount(file_name string) {
 
+	//Create a work queue
+	workQueue := make(chan string)
+
+	//To check if everyone is done
+	complete := make(chan bool)
+
+	//define value for concurrent processing
+	var concurrency = 5
+	
 	// Counts: [Word] => Count
-	counts := make(map[string]int)
+	//counts := make(map[string]int)
 
-	// Open File
-	file, err := os.Open(file_name)
-	Check(err)
+	//Create a count store here and pass it on to each thread
+	countStore := New()
+	
+	go func() {
+		// Open File
+		file, err := os.Open(file_name)
+		Check(err)
 
-	// Punctuation-Removal
-	var delimiters = strings.NewReplacer("\"", "", ".", "", ",", "", "?", "")
+		defer file.Close()
+		// Punctuation-Removal
+		var delimiters = strings.NewReplacer("\"", "", ".", "", ",", "", "?", "")
 
-	// Read Lines
-	scanner := bufio.NewScanner(file)
+		// Read Lines
+		scanner := bufio.NewScanner(file)
 
-	// For Each Line
-	for scanner.Scan() {
+		// For Each Line
+		for scanner.Scan() {
 
-		// Line (Remove Delimiters)
-		line := scanner.Text()
-		line = delimiters.Replace(line)
+			// Line (Remove Delimiters)
+			line := scanner.Text()
+			line = delimiters.Replace(line)
 
+			//put the line in the queue
+			workQueue <- line
+
+		}
+
+		//close the queue since we have gathered all the lines
+		close(workQueue)
+	}()
+	
+	for i:=0; i < concurrency; i++ {
+
+		//Work in parallel on all the lines
+		go startLineProcessing(workQueue, complete, countStore)
+	}
+
+	for i:=0; i < concurrency; i++ {
+
+		//mark that all work is done, join the threads
+		<-complete
+	}
+
+	// Sort Words By Count
+	sorted := sortByWordCount(countStore.counts)
+
+	// Display
+	for _, v := range sorted {
+		fmt.Printf("%-10s %5d\n", v.word, v.freq)
+	}
+}
+
+func startLineProcessing(workQueue chan string,  complete chan bool, cs *CountStore ) {
+
+	for line := range workQueue {
+		
 		// Extract Words
 		words := strings.Fields(line)
 
@@ -45,27 +109,26 @@ func WordCount(file_name string) {
 			if word == "" {
 				fmt.Println("Got empty word when splitting " + line)
 			}
-			
-			if _, ok := counts[word]; ok {
+
+			//instead of locking the whole function, just lock the data structure
+			cs.Lock()
+
+			if _, ok := cs.counts[word]; ok {
 
 				// Word Exists
-				counts[word]++
+				cs.counts[word]++
 
 			} else {
 
 				// New Word!
-				counts[word] = 1
+				cs.counts[word] = 1
 			}
+
+			cs.Unlock()
 		}
 	}
 
-	// Sort Words By Count
-	sorted := sortByWordCount(counts)
-
-	// Deisplay
-	for _, v := range sorted {
-		fmt.Printf("%-10s %5d\n", v.word, v.freq)
-	}
+	complete <- true
 }
 
 type Count struct {
